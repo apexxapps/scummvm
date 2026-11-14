@@ -132,6 +132,7 @@ private:
 	NameToOffsetMap _nameToOffsetDOTTAndFT;
 	NameToIndexMap _nameToIndexMISpeech;
 	NameToIndexMap _nameToIndexMISpeechPatched;
+	OffsetToIndexMap _soundIdToIndexMISFX; // MI1 SE: sound resource number -> SFXOriginal.xwb entry
 
 	AudioIndex _musicEntries;
 	AudioIndex _speechEntries;

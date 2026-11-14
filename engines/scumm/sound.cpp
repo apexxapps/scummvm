@@ -234,11 +234,13 @@ void Sound::triggerSound(int soundID) {
 	         && soundTag == MKTAG('S','B','L',' ')) {
 		debugC(DEBUG_SOUND, "Using SBL sound effect");
 
+		// The SE's effect where it has one, else the original sample
 		if (shouldInjectMISEAudio()) {
 			stream = _soundSE->getAudioStreamFromIndex(soundID, kSoundSETypeSFX);
-			if (stream)
+			if (stream) {
 				_mixer->playStream(Audio::Mixer::kSFXSoundType, nullptr, stream, soundID);
-			return;
+				return;
+			}
 		}
 
 		// SBL resources essentially contain VOC sound data.

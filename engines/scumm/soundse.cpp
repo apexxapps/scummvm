@@ -167,6 +167,16 @@ void SoundSE::indexXWBFile(SoundSEType type) {
 			if (type == kSoundSETypeSpeech) {
 				(*audioIndex)[i].name = name;
 				_nameToIndexMISpeech[name] = i;
+			} else if (type == kSoundSETypeSFX) {
+				// MI1 SE names its effects after the sound resource they
+				// replace ("8_sound_SBL_growl" is entry 6), and the bank
+				// skips the sounds it has no replacement for
+				const char *digits = name.c_str();
+				uint32 soundId = 0;
+				while (*digits >= '0' && *digits <= '9')
+					soundId = soundId * 10 + (*digits++ - '0');
+				if (digits != name.c_str() && *digits == '_')
+					_soundIdToIndexMISFX[soundId] = i;
 			} else if (type == kSoundSETypePatch) {
 				// Patch audio resources for MI2
 				// Note: We assume that patch XWB files always contain file names
@@ -763,6 +773,14 @@ Audio::SeekableAudioStream *SoundSE::getAudioStreamFromOffset(uint32 offset, Sou
 Audio::SeekableAudioStream *SoundSE::getAudioStreamFromIndex(int32 index, SoundSEType type) {
 	AudioIndex *audioIndex = getAudioEntries(type);
 	AudioEntry audioEntry = {};
+
+	// MI1 SE: effects by sound number, where the bank names them. A sound
+	// with no replacement gets none, and the caller plays the original.
+	if (type == kSoundSETypeSFX && !_soundIdToIndexMISFX.empty()) {
+		if (index < 0 || !_soundIdToIndexMISFX.contains((uint32)index))
+			return nullptr;
+		index = _soundIdToIndexMISFX[(uint32)index];
+	}
 
 	if (index < 0 || index >= (int32)audioIndex->size())
 		return nullptr;
