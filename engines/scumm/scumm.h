@@ -1357,6 +1357,7 @@ public:
 
 	virtual void actorTalk(const byte *msg);
 	void stopTalk();
+	void stopTalkForMessage();
 	int getTalkingActor();		// Wrapper around VAR_TALK_ACTOR for V1 Maniac
 	void setTalkingActor(int variable);
 

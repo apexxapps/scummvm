@@ -3463,6 +3463,15 @@ void ScummEngine_v7::actorTalk(const byte *msg) {
 }
 #endif
 
+void ScummEngine::stopTalkForMessage() {
+	// The new message is in _charsetBuffer. MI1/MI2 SE: when it repeats the
+	// line being spoken, or only clears the text, the voice plays on.
+	const bool keepSpeech = _sound->keepRemasteredSpeechFor((const char *)_charsetBuffer, (uint16)_actorToPrintStrFor);
+	stopTalk();
+	if (keepSpeech)
+		_sound->_digiSndMode |= DIGI_SND_MODE_TALKIE;
+}
+
 void ScummEngine::actorTalk(const byte *msg) {
 	Actor *a;
 
@@ -3480,7 +3489,7 @@ void ScummEngine::actorTalk(const byte *msg) {
 
 	if (_actorToPrintStrFor == 0xFF) {
 		if (!_keepText) {
-			stopTalk();
+			stopTalkForMessage();
 		}
 		setTalkingActor(0xFF);
 	} else {
@@ -3492,7 +3501,7 @@ void ScummEngine::actorTalk(const byte *msg) {
 			oldact = 0xFF;
 		} else {
 			if (!_keepText) {
-				stopTalk();
+				stopTalkForMessage();
 			}
 			setTalkingActor(a->_number);
 			if (_game.heversion != 0)

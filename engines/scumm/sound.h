@@ -106,6 +106,12 @@ protected:
 	bool _useRemasteredAudio = false;
 	bool _enableAmbienceSounds = false;
 
+	// MI1/MI2 SE: the line whose voice is on the talk channel, who said it,
+	// and whether the next stopTalkSound() should leave it playing
+	uint32 _remasteredSpeechHash = 0;
+	uint16 _remasteredSpeechActor = 0;
+	bool _keepRemasteredSpeech = false;
+
 public:
 	Audio::SoundHandle *_talkChannelHandle;	// Handle of mixer channel actor is talking on
 
@@ -155,6 +161,7 @@ public:
 
 	bool shouldInjectMISEAudio() const;
 	void startRemasteredSpeech(const char *msgString, uint16 roomNumber, uint16 actorTalking, uint16 numWaits);
+	bool keepRemasteredSpeechFor(const char *msgString, uint16 actorTalking);
 
 	// TODO: Duplicate this in Sound as well?
 	bool isRolandLoom() const {

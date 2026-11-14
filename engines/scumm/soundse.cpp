@@ -898,6 +898,10 @@ int32 SoundSE::handleMISESpeech(const char *msgString, const char *speechFilenam
 	return -1;
 }
 
+uint32 SoundSE::getSpeechHash(const char *msgString) {
+	return (uint32)calculateStringHash(calculateCurrentString(msgString).c_str());
+}
+
 int32 SoundSE::getAmbienceTrack(int32 musicTrack) {
 #if 0
 	// TODO: Read ambience tracks from game resource files

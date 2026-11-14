@@ -814,6 +814,15 @@ void Sound::startTalkSound(uint32 offset, uint32 length, int mode, Audio::SoundH
 }
 
 void Sound::stopTalkSound() {
+	if (_keepRemasteredSpeech) {
+		// A repeat of the line being spoken, or the blank that clears it:
+		// let the SE's voice play out (see keepRemasteredSpeechFor)
+		_keepRemasteredSpeech = false;
+		return;
+	}
+
+	_remasteredSpeechHash = 0;
+
 	if (_digiSndMode & DIGI_SND_MODE_TALKIE) {
 		if (_vm->_imuseDigital) {
 #ifdef ENABLE_SCUMM_7_8
@@ -2232,6 +2241,14 @@ void Sound::startRemasteredSpeech(const char *msgString, uint16 roomNumber, uint
 	// Crudely adapted from the disasm of MI1SE...
 	// TODO: Apply the various speech-line substitutions performed per-game
 
+	// Some lines are printed several times in a few frames (e.g. the SCUMM
+	// Bar pirates' "GROG!!!"), each print a cue for the same whole SE clip.
+	// Don't restart the clip while it is still playing.
+	const uint32 hash = _soundSE->getSpeechHash(msgString);
+	if (hash && hash == _remasteredSpeechHash && actorTalking == _remasteredSpeechActor &&
+		_mixer->isSoundHandleActive(*_talkChannelHandle))
+		return;
+
 	int32 soundIndex = _soundSE->handleMISESpeech(
 		msgString,
 		nullptr,
@@ -2242,7 +2259,21 @@ void Sound::startRemasteredSpeech(const char *msgString, uint16 roomNumber, uint
 
 	if (soundIndex >= 0) {
 		talkSound(soundIndex, 0, DIGI_SND_MODE_TALKIE);
+		_remasteredSpeechHash = hash;
+		_remasteredSpeechActor = actorTalking;
 	}
+}
+
+bool Sound::keepRemasteredSpeechFor(const char *msgString, uint16 actorTalking) {
+	// Keep an SE voice that is still playing when the same speaker repeats
+	// its line, or when the new message is a blank that only clears the text
+	if (!shouldInjectMISEAudio() || !_remasteredSpeechHash ||
+		!_mixer->isSoundHandleActive(*_talkChannelHandle))
+		return false;
+
+	const uint32 hash = _soundSE->getSpeechHash(msgString);
+	_keepRemasteredSpeech = (hash == 0 || (hash == _remasteredSpeechHash && actorTalking == _remasteredSpeechActor));
+	return _keepRemasteredSpeech;
 }
 
 bool Sound::shouldInjectMISEAudio() const {

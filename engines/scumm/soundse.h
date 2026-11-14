@@ -84,6 +84,10 @@ public:
 								uint16 actorTalking,
 								uint16 numWaits);
 
+	// The SE's hash of a line's text (letters and digits only, any case);
+	// 0 for a line with none, such as the " " that clears the text
+	uint32 getSpeechHash(const char *msgString);
+
 	void setupMISEAudioParams(int32 scriptNum, int32 scriptOffset) {
 		_currentScriptSavedForSpeechMI = scriptNum;
 		_currentScriptOffsetSavedForSpeechMI = scriptOffset;
