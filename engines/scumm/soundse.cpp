@@ -23,6 +23,7 @@
 #include "common/timer.h"
 #include "common/util.h"
 #include "common/substream.h"
+#include "common/memstream.h"
 
 #include "scumm/file.h"
 #include "scumm/scumm.h"
@@ -138,7 +139,7 @@ void SoundSE::indexXWBFile(SoundSEType type) {
 
 	for (uint32 i = 0; i < entryCount; i++) {
 		AudioEntry entry;
-		/*uint32 flagsAndDuration = */ f->readUint32LE();
+		const uint32 flagsAndDuration = f->readUint32LE();
 		uint32 format = f->readUint32LE();
 		entry.offset = f->readUint32LE() + segments[kXWBSegmentEntryWaveData].offset;
 		entry.length = f->readUint32LE();
@@ -150,6 +151,7 @@ void SoundSE::indexXWBFile(SoundSEType type) {
 		entry.rate = (format >> (2 + 3)) & ((1 << 18) - 1);
 		entry.align = (format >> (2 + 3 + 18)) & ((1 << 8) - 1);
 		entry.bits = (format >> (2 + 3 + 18 + 8)) & ((1 << 1) - 1);
+		entry.duration = flagsAndDuration >> 4;
 		entry.isPatched = false;
 
 		audioIndex->push_back(entry);
@@ -330,6 +332,7 @@ void SoundSE::indexFSBFile(SoundSEType type) {
 		entry.codec = kFSBCodecMP3;
 		entry.align = 0;
 		entry.bits = 16;
+		entry.duration = 0;
 		entry.isPatched = false;
 
 		audioIndex->push_back(entry);
@@ -662,13 +665,7 @@ Audio::SeekableAudioStream *SoundSE::createSoundStream(Common::SeekableSubReadSt
 		);
 	}
 	case kXWBCodecWMA:
-		// TODO: Implement WMA codec
-		warning("createSoundStream: WMA codec not implemented");
-		delete stream;
-		return nullptr;
-#if 0
 		return new HeaderlessWMAStream(stream, entry, disposeAfterUse);
-#endif
 	case kFSBCodecMP3:
 #ifdef USE_MAD
 		return Audio::makeMP3Stream(
@@ -925,67 +922,154 @@ void SoundSE::stopAmbience() {
 	_mixer->stopHandle(_ambienceHandle);
 }
 
-#if 0
 HeaderlessWMAStream::HeaderlessWMAStream(
 					Common::SeekableReadStream *stream,
 					AudioEntry entry,
 					DisposeAfterUse::Flag disposeAfterUse) :
 					_stream(stream), _entry(entry), _disposeAfterUse(disposeAfterUse) {
-	// Taken from https://github.com/bgbennyboy/Monkey-Island-Explorer/blob/master/uMIExplorer_XWBManager.pas
-	const uint16 blockAlignArray[] = {
+	// xWMA in XACT banks: the low 5 bits of the format's block align field
+	// index the packet size, the top 3 bits the average bytes per second
+	// (DirectXTK's xwbdump.cpp: aWMABlockAlign, aWMAAvgBytesPerSec).
+	static const uint16 blockAlignArray[] = {
 		929, 1487, 1280, 2230, 8917,
 		8192, 4459, 5945, 2304, 1536,
 		1485, 1008, 2731, 4096, 6827,
 		5462, 1280
 	};
+	static const uint16 avgBytesPerSecArray[] = {
+		12000, 24000, 4000, 6000, 8000, 20000, 2500
+	};
 
-	const uint16 index = _entry.align < ARRAYSIZE(blockAlignArray) ? _entry.align : 0;
-	const uint32 blockAlign = blockAlignArray[index];
-	const uint32 bitRate = (_entry.bits + 1) * 8;
+	const uint16 blockAlignIndex = _entry.align & 0x1F;
+	const uint16 bytesPerSecIndex = _entry.align >> 5;
+	_blockAlign = blockAlignArray[blockAlignIndex < ARRAYSIZE(blockAlignArray) ? blockAlignIndex : 0];
+	_bitRate = avgBytesPerSecArray[bytesPerSecIndex < ARRAYSIZE(avgBytesPerSecArray) ? bytesPerSecIndex : 0] * 8;
 
-	_wmaCodec = new Audio::WMACodec(2, _entry.rate, _entry.channels, bitRate, blockAlign);
-	_audioStream = _wmaCodec->decodeFrame(*stream);
+	// The xWMA encoder only allows a few channel / rate / bit rate
+	// combinations and some files carry a fake bit rate, while the decoder
+	// needs the real one (MI1:SE's mono effects say 96 kbps but are 48 kbps).
+	// Normalized as in FFmpeg's xWMA demuxer.
+	if (_entry.channels == 1) {
+		if ((_entry.rate == 22050 || _entry.rate == 32000) && (_bitRate == 48000 || _bitRate == 192000))
+			_bitRate = 20000;
+		else if (_entry.rate == 44100 && (_bitRate == 96000 || _bitRate == 192000))
+			_bitRate = 48000;
+	} else if (_entry.channels == 2) {
+		if (_entry.rate == 22050 && (_bitRate == 48000 || _bitRate == 192000))
+			_bitRate = 32000;
+		else if (_entry.rate == 32000 && _bitRate == 192000)
+			_bitRate = 48000;
+	}
+
+	// The codec's output starts two frames late (MDCT overlap and the bit
+	// reservoir): drop those, so the stream lines up with the XWB duration
+	// (a frame is 512, 1024 or 2048 samples, by sample rate, as in WMACodec).
+	const uint32 frameLen = _entry.rate <= 16000 ? 512 : (_entry.rate <= 22050 ? 1024 : 2048);
+	_codecDelay = 2 * frameLen * _entry.channels;
+
+	_packet = new byte[_blockAlign];
+
+	resetCodec();
 }
 
 HeaderlessWMAStream::~HeaderlessWMAStream() {
 	delete _wmaCodec;
 	delete _audioStream;
+	delete[] _packet;
 	if (_disposeAfterUse == DisposeAfterUse::Flag::YES)
 		delete _stream;
 }
 
-bool HeaderlessWMAStream::seek(const Audio::Timestamp &where) {
-	if (where == 0) {
-		return rewind();
+void HeaderlessWMAStream::resetCodec() {
+	delete _wmaCodec;
+	delete _audioStream;
+	_audioStream = nullptr;
+
+	// xWMA has no codec extradata. Use the standard WMAv2 one, as FFmpeg's
+	// xWMA demuxer does: flags 0x1F = exponents in Huffman code, bit
+	// reservoir (each packet is one superframe), variable block lengths.
+	static const byte extraData[6] = { 0, 0, 0, 0, 0x1F, 0 };
+	Common::MemoryReadStream extraDataStream(extraData, sizeof(extraData));
+
+	_wmaCodec = new Audio::WMACodec(2, _entry.rate, _entry.channels, _bitRate, _blockAlign, &extraDataStream);
+	_stream->seek(0);
+	_samplesToDrop = _codecDelay;
+	_samplesRead = 0;
+	_flushed = false;
+}
+
+bool HeaderlessWMAStream::decodePacket() {
+	if (_stream->pos() + (int64)_blockAlign > _stream->size()) {
+		// Past the last packet: take the frame the codec still holds
+		if (_flushed)
+			return false;
+		_flushed = true;
+		_audioStream = _wmaCodec->flush();
+		return true;
 	}
 
-	// Seeking is not supported
-	return false;
+	if (_stream->read(_packet, _blockAlign) != _blockAlign)
+		return false;
+
+	// The codec reads the whole stream it is given as one superframe
+	Common::MemoryReadStream packet(_packet, _blockAlign);
+	_audioStream = _wmaCodec->decodeFrame(packet);
+	return true;
+}
+
+bool HeaderlessWMAStream::seek(const Audio::Timestamp &where) {
+	// No seek table is used: decode from the start and drop what comes before
+	resetCodec();
+
+	uint32 samplesToSkip = Audio::convertTimeToStreamPos(where, getRate(), isStereo()).totalNumberOfFrames();
+	int16 skipBuffer[4096];
+	while (samplesToSkip > 0) {
+		const int samplesRead = readBuffer(skipBuffer, MIN<uint32>(samplesToSkip, ARRAYSIZE(skipBuffer)));
+		if (samplesRead <= 0)
+			return false;
+		samplesToSkip -= samplesRead;
+	}
+
+	return true;
 }
 
 int HeaderlessWMAStream::readBuffer(int16 *buffer, const int numSamples) {
+	const uint32 totalSamples = _entry.duration * _entry.channels;
+	const int wanted = MIN<uint32>(numSamples, totalSamples - _samplesRead);
 	int samplesDecoded = 0;
 
-	for (;;) {
-		if (_audioStream) {
-			samplesDecoded += _audioStream->readBuffer(buffer + samplesDecoded, numSamples - samplesDecoded);
-
-			if (_audioStream->endOfData()) {
-				delete _audioStream;
-				_audioStream = nullptr;
-			}
+	while (samplesDecoded < wanted) {
+		if (!_audioStream) {
+			if (!decodePacket())
+				break;
+			if (!_audioStream)
+				continue; // a packet that didn't decode: go on with the next one
 		}
 
-		if (samplesDecoded == numSamples || endOfData())
-			break;
+		const int samples = _audioStream->readBuffer(buffer + samplesDecoded, wanted - samplesDecoded);
+		if (_samplesToDrop > 0) {
+			const int drop = MIN<uint32>(samples, _samplesToDrop);
+			memmove(buffer + samplesDecoded, buffer + samplesDecoded + drop, (samples - drop) * sizeof(int16));
+			_samplesToDrop -= drop;
+			samplesDecoded += samples - drop;
+		} else {
+			samplesDecoded += samples;
+		}
 
-		if (!_audioStream) {
-			_audioStream = _wmaCodec->decodeFrame(*_stream);
+		if (_audioStream->endOfData()) {
+			delete _audioStream;
+			_audioStream = nullptr;
 		}
 	}
 
+	// Should the packets come out short of the XWB duration: pad with silence
+	if (samplesDecoded < wanted && !_audioStream) {
+		memset(buffer + samplesDecoded, 0, (wanted - samplesDecoded) * sizeof(int16));
+		samplesDecoded = wanted;
+	}
+
+	_samplesRead += samplesDecoded;
 	return samplesDecoded;
 }
-#endif
 
 } // End of namespace Scumm

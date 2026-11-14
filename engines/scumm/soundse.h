@@ -60,6 +60,7 @@ enum AudioCodec {
 struct AudioEntry {
 	uint64 offset;
 	uint32 length;
+	uint32 duration; // in samples per channel (XWB only)
 	AudioCodec codec;
 	byte channels;
 	uint16 rate;
@@ -178,9 +179,10 @@ private:
 	Audio::SeekableAudioStream *createSoundStream(Common::SeekableSubReadStream *stream, AudioEntry entry, DisposeAfterUse::Flag disposeAfterUse = DisposeAfterUse::YES);
 };
 
-#if 0
 /**
- * A special headerless WMA stream, used in MI1:SE and MI2:SE
+ * A special headerless WMA stream, used in MI1:SE and MI2:SE.
+ * The XWB banks hold xWMA: WMAv2 packets of a fixed block size, each one
+ * bit-reservoir superframe, with no ASF header and no codec extradata.
  */
 class HeaderlessWMAStream : public Audio::SeekableAudioStream {
 public:
@@ -191,22 +193,31 @@ public:
 
 	int readBuffer(int16 *buffer, const int numSamples) override;
 
-	bool endOfData() const override { return _stream->eos(); }
+	bool endOfData() const override { return _samplesRead >= _entry.duration * _entry.channels; }
 	bool isStereo() const override { return _entry.channels == 2; }
 	int getRate() const override { return _entry.rate; }
 	Audio::Timestamp getLength() const override {
-		return Audio::Timestamp(_entry.length / 10000, _entry.rate);
+		return Audio::Timestamp(0, _entry.duration, _entry.rate);
 	}
 	bool seek(const Audio::Timestamp &where) override;
 
 private:
+	void resetCodec();
+	bool decodePacket();
+
 	Common::SeekableReadStream *_stream = nullptr;
-	AudioStream *_audioStream = nullptr;
+	Audio::AudioStream *_audioStream = nullptr;
 	AudioEntry _entry;
 	DisposeAfterUse::Flag _disposeAfterUse;
 	Audio::WMACodec *_wmaCodec = nullptr;
+	uint32 _blockAlign = 0;
+	uint32 _bitRate = 0;
+	uint32 _codecDelay = 0;   // samples the codec puts out before the audio starts
+	uint32 _samplesToDrop = 0;
+	uint32 _samplesRead = 0;  // samples (all channels) given out since the start
+	bool _flushed = false;
+	byte *_packet = nullptr;
 };
-#endif
 
 } // End of namespace Scumm
 
