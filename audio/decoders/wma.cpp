@@ -549,6 +549,24 @@ AudioStream *WMACodec::decodeFrame(Common::SeekableReadStream &data) {
 	return makeRawStream(stream, _sampleRate, _audioFlags, DisposeAfterUse::YES);
 }
 
+AudioStream *WMACodec::flush() {
+	const int outputDataSize = _channels * _frameLen;
+	int16 *outputData = new int16[outputDataSize]();
+
+	const float *floatOut[kChannelsMax];
+	for (int i = 0; i < kChannelsMax; i++)
+		floatOut[i] = _frameOut[i];
+
+	floatToInt16Interleave(outputData, floatOut, _frameLen, _channels);
+
+	memset(_frameOut, 0, sizeof(_frameOut));
+	_lastSuperframeLen = 0;
+	_lastBitoffset     = 0;
+	_resetBlockLengths = true;
+
+	return makeRawStream((const byte *)outputData, outputDataSize * 2, _sampleRate, _audioFlags, DisposeAfterUse::YES);
+}
+
 Common::SeekableReadStream *WMACodec::decodeSuperFrame(Common::SeekableReadStream &data) {
 	uint32 size = data.size();
 	if (size < _blockAlign) {

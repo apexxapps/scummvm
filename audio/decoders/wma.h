@@ -51,6 +51,13 @@ public:
 
 	AudioStream *decodeFrame(Common::SeekableReadStream &data) override;
 
+	/**
+	 * At the end of a stream: return the last frame the codec still holds
+	 * (the second half of the final MDCT overlap), as FFmpeg's WMA decoder
+	 * does when it is flushed.
+	 */
+	AudioStream *flush();
+
 private:
 	static const int kChannelsMax = 2; ///< Max number of channels we support.
 
