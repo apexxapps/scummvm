@@ -2098,11 +2098,13 @@ void ScummEngine::saveLoadWithSerializer(Common::Serializer &s) {
 	//
 	if (s.getVersion() >= VER(24)) {
 		AudioCDManager::Status info;
+		// Store the status of the CD player in use, which may be the
+		// file-based one (e.g. MI1 SE, Loom with CDDA.SOU)
 		if (s.isSaving())
-			info = _system->getAudioCDManager()->getStatus();
+			info = _sound->getCDStatus();
 		syncWithSerializer(s, info);
 
-		if (s.isLoading() && info.playing) {
+		if (s.isLoading() && (info.playing || _sound->isLoopingFileBasedCDSound())) {
 			_sound->restoreCDAudioAfterLoad(info);
 		}
 	}

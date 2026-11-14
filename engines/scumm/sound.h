@@ -181,6 +181,12 @@ public:
 	void restoreCDAudioAfterLoad(AudioCDManager::Status &info) {
 		_soundCD->restoreCDAudioAfterLoad(info);
 	}
+	AudioCDManager::Status getCDStatus() {
+		return _soundCD->getCDStatus();
+	}
+	bool isLoopingFileBasedCDSound() {
+		return _soundCD->isLoopingFileBasedCDSound();
+	}
 	void setupMISEAudioParams(int32 scriptNum, int32 scriptOffset) {
 		_soundSE->setupMISEAudioParams(scriptNum, scriptOffset);
 	}

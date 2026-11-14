@@ -81,6 +81,7 @@ public:
 	int pollCD() const;
 	void updateCD();
 	AudioCDManager::Status getCDStatus();
+	bool isLoopingFileBasedCDSound();
 	int getCurrentCDSound() const { return _currentCDSound; }
 
 	int restoreAfterLoad();

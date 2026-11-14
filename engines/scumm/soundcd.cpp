@@ -204,6 +204,19 @@ AudioCDManager::Status SoundCD::getCDStatus() {
 	}
 }
 
+// Older saves stored the system CD player's status, which never shows the
+// file-based CD audio as playing. A looping track that is still the current
+// CD sound was playing when the game was saved (stopping it clears
+// _currentCDSound).
+bool SoundCD::isLoopingFileBasedCDSound() {
+	if (!_hasFileBasedCDAudio || !_currentCDSound)
+		return false;
+
+	int loops = 1, start = 0, end = 0;
+	getCDTrackIdFromSoundId(_currentCDSound, loops, start, end);
+	return loops == 0xff;
+}
+
 int SoundCD::getCDTrackIdFromSoundId(int soundId, int &loops, int &start, int &end) {
 	if (_vm->_game.id == GID_LOOM && _vm->_game.version == 4) {
 		loops = 0;
